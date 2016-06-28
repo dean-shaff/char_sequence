@@ -1,0 +1,6 @@
+*.ipynb
+*.hdf5
+*.pkl
+*.png
+*.txt
+*.pyc
