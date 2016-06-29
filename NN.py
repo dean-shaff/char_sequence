@@ -26,9 +26,10 @@ class HiddenLayer(object):
                                                         dtype=theano.config.floatX),name='W')
 
         self.b = theano.shared(np.asarray(np.zeros(dim_out), dtype=theano.config.floatX), name='b')
-
-        self.output = trans_func(T.tensordot(input,self.W) + self.b)
-
+        self.params = [self.W, self.b] 
+        self.lin_output = T.tensordot(input,self.W) + self.b  
+        self.nonlin_output = trans_func(self.lin_output)  
+    
     def set_params(self):
         pass
 
@@ -52,22 +53,59 @@ class NN(object):
                     nonlinear outputs. 
         """
         assert dim[0] == dim[-1], "You're not building a sequence encoder"
+        
+        self.seq_len = dim[0][0] # seqence length  
+        self.char_len = dim[0][1] # number of characters  
         trans_func = kwargs.get('t_func',T.nnet.sigmoid)
         rng = np.random.RandomState(1234) 
         hiddenLayers = [HiddenLayer(input,dim[0], dim[1],'h0', rng, trans_func)]
+        params = hiddenLayers[-1].params
+
         for i in xrange(1,len(dim)-1):
             name_i = "h_{}".format(i) 
-            hiddenLayers.append(HiddenLayer(hiddenLayers[-1].output,dim[i],dim[i+1],name_i,rng, trans_func))
-        self.hiddenLayers = hiddenLayers 
-        self.nn_output = self.hiddenLayers[-1].output
+            hiddenLayers.append(HiddenLayer(hiddenLayers[-1].nonlin_output,dim[i],dim[i+1],name_i,rng, trans_func))
+            params += hiddenLayers[-1].params 
         
+        self.params = params 
+        self.hiddenLayers = hiddenLayers 
+        self.nn_nonlin_output = self.hiddenLayers[-1].nonlin_output
+        self.nn_lin_output = self.hiddenLayers[-1].lin_output
+
     def sqr_error(self,y):
         """
         Calculate the error between the input (x) and the observation (y) 
         args:
             -y: A theano shared variable corresponding to the observation. Will be 3 dimensional
         """
-        return T.mean((y - self.nn_output)**2)
+        return T.mean((y - self.nn_nonlin_output)**2)
+
+
+    def negloglikelihood(self,y):
+        """
+        Calculate the negative log likelihood error between the input and the observation 
+        ***This is really darn slow ATM***
+        args:
+            -y: A theano shared variable corresponding to the observation. Will be 3-dimensional. 
+        """
+        softmax = T.nnet.sigmoid(self.nn_lin_output) 
+        log_tot = T.log(softmax)
+        y_arg_max = T.argmax(y, axis=2) # assuming y is in hot max form. Dim = (minibatch size, sequence len)  
+        # first index is minibatch, second is sequence index, last is character
+        log_prob, updates = theano.scan(fn=lambda i,yi: log_tot[i,T.arange(y_arg_max.shape[1]),yi],
+                                        sequences = [T.arange(y_arg_max.shape[0]), y_arg_max]) 
+
+                                # self.log_prob = log_prob
+        return -T.mean(log_prob)
+
+    def error(self, y):
+        """
+        Calculate classification error.
+        """
+        y_arg_max = T.argmax(y, axis=2) # assuming y is one hot 
+        softmax = T.nnet.sigmoid(self.nn_lin_output) #is this right??? 
+        y_guess = T.argmax(softmax, axis=2) 
+        error = T.sum(T.neq(y_guess, y_arg_max))
+        return error 
 
     def save_params(self,*args):
         """
@@ -84,7 +122,7 @@ class NN(object):
             for arg in args:
                 model += "_{}"
                 model.format(arg) 
-        model += ".hdf5"  
+            model += ".hdf5"  
         else:
             name = 'model.hdf5'
         f = h5py.File(name, 'w')

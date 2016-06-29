@@ -41,10 +41,39 @@ class TextDataset(object):
         else:
             pass 
         f.close() 
+        self.char_len = len(chars) 
         self.dat = dat 
         self.data_one_hot = dat_one_hot 
         self.obs_dat = obs_dat 
         self.input_dat = input_dat
+
+    def cut_by_sequence(self, seq_len):
+        """
+        Cut up the dataset into matrices, each (seq_len x char_len) big.
+        This also creates training and testing datasets. 
+        args:
+            - seq_len: The length of the sequence 
+        """
+        n_seq = int(self.dat.shape[0] / seq_len)
+        obs_dat = self.obs_dat[:n_seq*seq_len,:].reshape((n_seq,seq_len,self.char_len))
+        in_dat = self.input_dat[:n_seq*seq_len,:].reshape((n_seq,seq_len,self.char_len))
+        print("Creating shared variables...") 
+        t0 = time.time()
+        self.in_train = theano.shared(in_dat[:int(0.6*n_seq),:,:])
+        self.obs_train = theano.shared(obs_dat[:int(0.6*n_seq),:,:])
+
+        self.in_test = theano.shared(in_dat[int(0.6*n_seq):,:,:])
+        self.obs_test = theano.shared(obs_dat[int(0.6*n_seq):,:,:])
+        print("Created shared variables. Took {:.2f} seconds.".format(time.time() - t0))
+        
+
+
+
+
+
+
+
 if __name__ == '__main__':
     filename = 'shakespeare.hdf5'
-    txter = TextDataset(filename) 
+    txter = TextDataset(filename)
+    txter.cut_by_sequence(50) 
